@@ -29,16 +29,21 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      const [initialStore, { data: { session } }] = await Promise.all([
-        getStore(),
-        supabase.auth.getSession(),
-      ])
-      setStore(initialStore)
-      setIsAdmin(session?.user?.email === 'm@alone.ltd')
+      if (supabase) {
+        const [initialStore, { data: { session } }] = await Promise.all([
+          getStore(),
+          supabase.auth.getSession(),
+        ])
+        setStore(initialStore)
+        setIsAdmin(session?.user?.email === 'm@alone.ltd')
+      } else {
+        setStore(await getStore())
+      }
       setLoading(false)
     }
     init()
 
+    if (!supabase) return
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAdmin(session?.user?.email === 'm@alone.ltd')
     })

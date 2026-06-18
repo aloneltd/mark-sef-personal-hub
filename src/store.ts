@@ -179,20 +179,22 @@ export const DEFAULT_CONTENT: ContentStore = {
 }
 
 export const getStore = async (): Promise<ContentStore> => {
-  const { data, error } = await supabase
-    .from('hub_settings')
-    .select('content')
-    .eq('id', 1)
-    .single()
-
-  if (error || !data?.content || Object.keys(data.content).length === 0) {
+  if (!supabase) return DEFAULT_CONTENT
+  try {
+    const { data, error } = await supabase
+      .from('hub_settings')
+      .select('content')
+      .eq('id', 1)
+      .single()
+    if (error || !data?.content || Object.keys(data.content).length === 0) return DEFAULT_CONTENT
+    return { ...DEFAULT_CONTENT, ...data.content }
+  } catch {
     return DEFAULT_CONTENT
   }
-
-  return { ...DEFAULT_CONTENT, ...data.content }
 }
 
 export const saveStore = async (store: ContentStore): Promise<void> => {
+  if (!supabase) throw new Error('Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY')
   const { error } = await supabase
     .from('hub_settings')
     .upsert({ id: 1, content: store, updated_at: new Date().toISOString() })

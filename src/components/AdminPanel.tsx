@@ -130,6 +130,7 @@ const LoginForm: React.FC = () => {
     e.preventDefault()
     setLoading(true)
     setError('')
+    if (!supabase) { setError('Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.'); setLoading(false); return }
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
     if (err) setError(err.message)
     setLoading(false)
@@ -203,7 +204,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
   }
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut()
+    if (supabase) await supabase.auth.signOut()
   }
 
   const renderSectionEditor = (section: SectionDefinition, onSectionUpdate: (updates: Partial<SectionDefinition>) => void) => {
