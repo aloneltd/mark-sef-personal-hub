@@ -4,6 +4,9 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 // Module-level: allocated once per warm serverless instance
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
 
+const responseCache = new Map<string, { text: string; expiresAt: number }>()
+const CACHE_TTL = 300_000
+
 // Free-tier guard: 10 req/min per IP
 const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
 function checkRateLimit(ip: string): boolean {
@@ -29,6 +32,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'messages array required' })
   }
 
+  const lastMsg = (messages as { role: string; text: string }[]).filter((m) => m.role === 'user').at(-1)?.text ?? ''
+  const cacheKey = `gemini-2.5-flash::${systemInstruction ?? ''}::${lastMsg}`
+  const now = Date.now()
+  const cached = responseCache.get(cacheKey)
+  if (cached && now < cached.expiresAt) return res.status(200).json({ text: cached.text })
+
   try {
     const config: Record<string, unknown> = {
       systemInstruction: systemInstruction || undefined,
@@ -49,7 +58,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 15000)),
     ])
 
-    return res.status(200).json({ text: response.text ?? '' })
+    const text = response.text ?? ''
+    if (text) responseCache.set(cacheKey, { text, expiresAt: now + CACHE_TTL })
+    return res.status(200).json({ text })
   } catch (err: any) {
     console.error('AI proxy error:', err)
     return res.status(500).json({ error: err.message ?? 'AI request failed' })
