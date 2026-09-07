@@ -1,4 +1,5 @@
 import { supabase } from './lib/supabase'
+import { DB_TIMEOUT_MS, sleep } from './lib/dbStatus'
 import { ContentStore, SectionDefinition, SectionStyleTokens, ImageSource } from './types'
 
 export const SCHEMA_VERSION = '1.3.6'
@@ -178,14 +179,19 @@ export const DEFAULT_CONTENT: ContentStore = {
   },
 }
 
+// Loads the CMS blob from Supabase. Falls back to the bundled DEFAULT_CONTENT when the
+// database is unreachable, times out (> DB_TIMEOUT_MS), or holds nothing yet.
 export const getStore = async (): Promise<ContentStore> => {
   if (!supabase) return DEFAULT_CONTENT
   try {
-    const { data, error } = await supabase
+    const query = supabase
       .from('hub_settings')
       .select('content')
       .eq('id', 1)
       .single()
+    const result = await Promise.race([query, sleep(DB_TIMEOUT_MS + 500).then(() => null)])
+    if (!result) return DEFAULT_CONTENT
+    const { data, error } = result
     if (error || !data?.content || Object.keys(data.content).length === 0) return DEFAULT_CONTENT
     return { ...DEFAULT_CONTENT, ...data.content }
   } catch {

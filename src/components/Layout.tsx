@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { NavLink, ThemeConfig, ContentStore } from '../types'
 import { Link, useLocation } from 'react-router-dom'
 import FloatingAIChat from './FloatingAIChat'
+import { useDbStatus } from '../lib/dbStatus'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -32,6 +33,7 @@ const getFontStack = (font: ThemeConfig['headingFont']) => {
 const Layout: React.FC<LayoutProps> = ({ children, navLinks, brandName, theme, store, onUpdate, isAdmin }) => {
   const location = useLocation()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const dbStatus = useDbStatus()
 
   const themeStyles = useMemo(() => `
     :root {
@@ -112,6 +114,11 @@ const Layout: React.FC<LayoutProps> = ({ children, navLinks, brandName, theme, s
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
           <div className="text-neutral-500 text-sm">© {new Date().getFullYear()} {brandName}. All rights reserved.</div>
           <div className="flex gap-6">
+            {dbStatus === 'offline' && (
+              <span className="text-neutral-600 text-xs mono" title="Live database unreachable — showing bundled default content" data-testid="offline-indicator">
+                ● OFFLINE MODE
+              </span>
+            )}
             <span className="text-neutral-600 text-xs mono">THEME ENGINE v1.3.3</span>
           </div>
         </div>

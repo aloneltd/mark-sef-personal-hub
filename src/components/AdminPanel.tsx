@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react'
 import { ContentStore, SectionType, SectionDefinition, ImageSource, NavLink, BlogPost, PodcastEpisode } from '../types'
 import { saveStore, DEFAULT_CONTENT } from '../store'
 import { supabase } from '../lib/supabase'
+import { useDbStatus } from '../lib/dbStatus'
 import AdminPreview from './AdminPreview'
 import { CommunityAdmin } from '../modules/CommunityAdmin'
 import { ThemeAdmin } from '../modules/ThemeAdmin'
@@ -125,6 +126,8 @@ const LoginForm: React.FC = () => {
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const dbStatus = useDbStatus()
+  const dbOffline = dbStatus === 'offline'
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -132,7 +135,7 @@ const LoginForm: React.FC = () => {
     setError('')
     if (!supabase) { setError('Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.'); setLoading(false); return }
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-    if (err) setError(err.message)
+    if (err) setError(/unreachable|offline|fetch/i.test(err.message) ? 'Database unavailable — sign-in is not possible until the Supabase project is restored.' : err.message)
     setLoading(false)
   }
 
@@ -141,6 +144,11 @@ const LoginForm: React.FC = () => {
       <div className="w-full max-w-sm p-10 border border-white/10 bg-neutral-900/50">
         <h1 className="text-xl font-bold italic mb-2">Master Control</h1>
         <p className="text-[10px] mono uppercase text-neutral-600 mb-8">Admin Access Required</p>
+        {dbOffline && (
+          <div className="mb-6 p-3 border border-amber-500/30 bg-amber-500/5 text-amber-400 text-xs mono" data-testid="db-unavailable">
+            DATABASE UNAVAILABLE — the Supabase project is paused or unreachable. The public site is running on bundled default content; admin sign-in and editing will work again once the database is restored.
+          </div>
+        )}
         <form onSubmit={handleLogin} className="space-y-4">
           <div>
             <label className="text-[9px] mono uppercase text-neutral-500 block mb-1">Email</label>
@@ -151,8 +159,8 @@ const LoginForm: React.FC = () => {
             <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-black border border-white/10 p-3 text-sm outline-none focus:border-white/30" required />
           </div>
           {error && <p className="text-red-400 text-xs mono">{error}</p>}
-          <button type="submit" disabled={loading} className="w-full py-3 bg-white text-black font-bold uppercase text-xs tracking-widest hover:bg-neutral-200 disabled:opacity-50">
-            {loading ? 'Authenticating...' : 'Access Control'}
+          <button type="submit" disabled={loading || dbOffline} className="w-full py-3 bg-white text-black font-bold uppercase text-xs tracking-widest hover:bg-neutral-200 disabled:opacity-50">
+            {loading ? 'Authenticating...' : dbOffline ? 'Database Unavailable' : 'Access Control'}
           </button>
         </form>
       </div>
@@ -168,6 +176,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
   const [editingPostId, setEditingPostId] = useState<string | null>(null)
   const [editingEpisodeId, setEditingEpisodeId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const dbStatus = useDbStatus()
 
   if (!isAdmin) return <LoginForm />
 
@@ -183,7 +192,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
       onUpdate(localStore)
       alert('DEPLOYMENT SUCCESSFUL.')
     } catch (e: any) {
-      alert('DEPLOYMENT FAILED: ' + e.message)
+      const msg = /unreachable|offline|fetch/i.test(String(e?.message)) ? 'Database unavailable — changes were not saved. Restore the Supabase project and deploy again.' : e.message
+      alert('DEPLOYMENT FAILED: ' + msg)
     } finally {
       setSaving(false)
     }
@@ -301,6 +311,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
       <div className="grid grid-cols-1 lg:grid-cols-2 h-full w-full">
         <div className="flex flex-col border-r border-white/5 bg-[#0d0d0d] overflow-y-auto w-full h-full">
           <div className="px-6 py-10">
+            {dbStatus === 'offline' && (
+              <div className="mb-6 p-3 border border-amber-500/30 bg-amber-500/5 text-amber-400 text-xs mono" data-testid="db-unavailable">
+                DATABASE UNAVAILABLE — edits below are local only and cannot be deployed until the Supabase project is restored.
+              </div>
+            )}
             <div className="flex justify-between items-start mb-10">
               <h1 className="text-3xl font-bold italic">Master Control</h1>
               <div className="flex gap-2">

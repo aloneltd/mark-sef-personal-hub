@@ -29,17 +29,16 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      if (supabase) {
-        const [initialStore, { data: { session } }] = await Promise.all([
-          getStore(),
-          supabase.auth.getSession(),
-        ])
-        setStore(initialStore)
-        setIsAdmin(session?.user?.email === 'm@alone.ltd')
-      } else {
-        setStore(await getStore())
-      }
+      // getStore() is bounded (see store.ts): with the DB paused it resolves to the
+      // bundled defaults within ~4s, so the loader can never spin forever.
+      setStore(await getStore())
       setLoading(false)
+      // Auth session is resolved off the critical path — public content never waits on it.
+      if (supabase) {
+        supabase.auth.getSession()
+          .then(({ data: { session } }) => setIsAdmin(session?.user?.email === 'm@alone.ltd'))
+          .catch(() => setIsAdmin(false))
+      }
     }
     init()
 
