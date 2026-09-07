@@ -1,71 +1,79 @@
 # DEPLOY-ENV — Mark SEF Personal Hub
 
-Status as of **2026-09-07**. The app is fully migrated off Supabase; two env vars still need
-to be copied over before the admin can save and signups can persist.
+Status **2026-09-07**. The app is fully migrated off Supabase. Sign-in works; **storage still
+needs credentials** before anything can be saved.
 
-## Already set on Vercel (done 2026-09-07)
+## Already set on Vercel (Production)
 
 | Variable | Status |
 |---|---|
-| `VITE_GOOGLE_CLIENT_ID` | ✅ set (Production) |
-| `SESSION_SECRET` | ✅ set (Production) — freshly generated 32-byte hex |
+| `VITE_GOOGLE_CLIENT_ID` | ✅ set |
+| `SESSION_SECRET` | ✅ set (freshly generated 32-byte hex) |
 | `GEMINI_API_KEY` | ✅ already present |
 
-## Still needed — 2 values, both already live on the `blink-talent` project
+## Still needed: give the app a way to write to Drive
 
-These two are **encrypted** on Vercel, so they can only be read by you (or from your own
-records). They are exactly the same values `blink-talent` uses — that project's
-`/api/health` proves they work today.
+> ⚠️ **A service-account key alone is not enough.** Google refuses service-account *writes*
+> into a normal My Drive folder — "Service Accounts do not have storage quota". The Drive
+> brick therefore tries two modes in order, and **user-OAuth is the one that actually works**
+> for a My Drive folder.
 
-| Variable | Where the value lives |
+### Mode 1 (preferred) — user OAuth, the app acting as you
+
+Set all three, and the app writes as `m@alone.ltd` into your own Drive:
+
+| Variable | What it is |
 |---|---|
-| `GOOGLE_SERVICE_ACCOUNT_KEY` | Vercel → project **blink-talent** → Settings → Environment Variables → `GOOGLE_SERVICE_ACCOUNT_KEY` (click the eye / "Copy Value"). It is the shared `sef-apps-drive` service-account JSON under `m@alone.ltd` |
-| `GOOGLE_DRIVE_FOLDER_ID` | Same place, `GOOGLE_DRIVE_FOLDER_ID`. It is the parent Drive folder shared with that service account as **Editor** |
+| `GOOGLE_CLIENT_ID` | The shared OAuth client id (server-side copy; same client as `VITE_GOOGLE_CLIENT_ID`) |
+| `GOOGLE_CLIENT_SECRET` | That client's secret |
+| `GOOGLE_REFRESH_TOKEN` | A refresh token for `m@alone.ltd` with a Drive scope |
+| `GOOGLE_DRIVE_FOLDER_ID` | Parent folder id. Optional-ish: if the token cannot see it, the app creates its own `SEF Apps Data (Mark SEF Personal Hub)` folder and uses that |
 
-You do **not** need a new folder: this app creates and uses its own `mark-sef-hub` subfolder
-inside that parent, so it can never collide with blink-talent's data.
+### Mode 2 (fallback) — service account
 
-### Option A — dashboard (easiest)
+| Variable | What it is |
+|---|---|
+| `GOOGLE_SERVICE_ACCOUNT_KEY` | The shared `sef-apps-drive` service-account JSON (same value the `blink-talent` project uses) |
+| `GOOGLE_DRIVE_FOLDER_ID` | Parent folder shared with that service account as **Editor** |
 
-1. Vercel → **blink-talent** → Settings → Environment Variables → copy each value.
-2. Vercel → **mark-sef-personal-hub** → Settings → Environment Variables → **Add New** →
-   name, value, environment **Production** → Save.
-3. Redeploy (Deployments → ⋯ → Redeploy, or just `git push`).
+Reads and folder listing work in this mode; **writes fail on a My Drive folder** unless the
+target is a Shared Drive the service account is a member of. Use Mode 1 unless you have one.
 
-### Option B — CLI, from this folder
+Either way the app creates and uses its own `mark-sef-hub` subfolder inside the parent, so
+apps sharing one folder id never collide.
+
+## Setting them
+
+Dashboard: Vercel → project **mark-sef-personal-hub** → Settings → Environment Variables → Add New →
+name, value, environment **Production** → Save → Redeploy.
+
+CLI, from `REBUILD/builds/mark-sef-personal-hub`:
 
 ```bash
-cd REBUILD/builds/mark-sef-personal-hub
-
-# paste the service-account JSON when prompted (it is one long line)
-vercel env add GOOGLE_SERVICE_ACCOUNT_KEY production
-
-# paste the folder id when prompted
+vercel env add GOOGLE_REFRESH_TOKEN production     # paste when prompted
+vercel env add GOOGLE_CLIENT_SECRET production
+vercel env add GOOGLE_CLIENT_ID production
 vercel env add GOOGLE_DRIVE_FOLDER_ID production
-
 git commit --allow-empty -m "chore: redeploy with Drive storage configured" && git push origin main
 ```
 
-Or non-interactively, if you have the values in files:
-
-```bash
-cat ~/path/to/sef-apps-drive.json | tr -d '\n' | vercel env add GOOGLE_SERVICE_ACCOUNT_KEY production
-printf '<FOLDER_ID>' | vercel env add GOOGLE_DRIVE_FOLDER_ID production
-```
-
-## Verify it worked
+## Verify
 
 ```bash
 curl -s https://mark-sef-personal-hub.vercel.app/api/health | python3 -m json.tool
 ```
 
-Expect `"ok": true`, `drive.tokenOk: true`, `drive.folderListStatus: 200` and
-`storeRead.ok: true`. Then sign in at `/admin` with `m@alone.ltd`, edit anything, press
-**Deploy** — the public site should show the change on reload, and
-`drive.collections` in `/api/health` should list `hub_content.json`.
+Expect `"ok": true` with `drive.driveAuthMode` reading `user-oauth` (or
+`service-account`), `drive.tokenOk: true` and `drive.folderListStatus: 200`.
+`drive.writeOk` is the one that proves saving works — a read-only setup will show
+`writeOk: false` with the reason. Then sign in at /admin with m@alone.ltd, edit anything and press **Deploy** — the change should survive a reload.
+
+`/api/health` also reports `gemini.primary` and `gemini.fallback` — the fallback model id
+is discovered from Google's ListModels rather than hard-coded, so it cannot rot silently.
 
 ## Until then (what a visitor sees today)
 
 - The public site renders instantly from bundled default content — no error, no blank page.
-- `/admin` shows the Google sign-in button plus a clear "STORAGE NOT CONFIGURED" notice.
-- Community signup returns an honest "temporarily unavailable" message, never a fake success.
+- `/admin` shows the Google sign-in button and, once signed in, a clear
+  "storage not configured" banner on every view.
+- Every write returns an honest "temporarily unavailable" message, never a fake success.
