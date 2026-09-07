@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { driveHealth, driveWriteProbe } from './_lib/drive.js'
 import { read, CACHE_TTL_MS } from './_lib/store.js'
+import { modelHealth } from './_lib/gemini-models.js'
 
 // Public, non-secret health check: is the backend wired up? Never returns key material.
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -31,7 +32,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     storage: 'google-drive-json',
     cacheTtlMs: CACHE_TTL_MS,
     auth: { provider: 'google-identity-services', clientId: !!process.env.VITE_GOOGLE_CLIENT_ID, sessionSecret: !!process.env.SESSION_SECRET },
-    gemini: { configured: !!process.env.GEMINI_API_KEY },
+    gemini: await modelHealth(),
     drive,
     storeRead,
     ...(write ? { write } : {}),

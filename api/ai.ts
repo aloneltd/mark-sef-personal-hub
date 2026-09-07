@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@google/genai'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { PRIMARY_MODEL, getFallbackModel, isOverloaded } from './_lib/gemini-models.js'
 
 // Module-level: allocated once per warm serverless instance
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
@@ -19,12 +20,6 @@ function checkRateLimit(ip: string): boolean {
   if (entry.count >= 10) return false
   entry.count++
   return true
-}
-
-/** True for quota/rate-limit/overload errors, which are worth retrying on a lighter model. */
-function isOverloaded(err: unknown): boolean {
-  const m = String((err as Error)?.message ?? err)
-  return /\b429\b|\b503\b|RESOURCE_EXHAUSTED|quota|rate.?limit|overloaded|UNAVAILABLE/i.test(m)
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -64,12 +59,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let response
     try {
-      response = await ask('gemini-2.5-flash')
-    } catch (err: any) {
-      // Rate limited or the model is busy — drop to the lighter model rather than failing.
-      if (!isOverloaded(err)) throw err
-      console.warn('AI proxy: falling back to gemini-2.5-flash-lite')
-      response = await ask('gemini-2.5-flash-lite')
+      response = await ask(PRIMARY_MODEL)
+    } catch (primaryErr: any) {
+      // Rate limited or busy — drop to a lighter model rather than failing.
+      if (!isOverloaded(primaryErr)) throw primaryErr
+      const fallback = await getFallbackModel()
+      if (!fallback) throw primaryErr
+      console.warn(`AI proxy: ${PRIMARY_MODEL} unavailable, falling back to ${fallback}`)
+      try {
+        response = await ask(fallback)
+      } catch (fallbackErr: any) {
+        // The visitor's problem is the PRIMARY failure (we're rate limited); a broken
+        // fallback must not turn that into a misleading generic error.
+        console.error('AI proxy: fallback also failed:', fallbackErr?.message)
+        throw primaryErr
+      }
     }
 
     const text = response.text ?? ''
