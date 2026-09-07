@@ -43,7 +43,7 @@ export const AIChatSection: React.FC<{ section: SectionDefinition; aiConfig: any
             </div>
             <form onSubmit={handleSend} className="p-4 flex gap-2">
               <input type="text" placeholder="Ask about recruiting or strategy..." className="flex-grow bg-black border border-white/10 px-4 py-3 rounded-sm outline-none focus:border-white/30 text-sm" value={input} onChange={e => setInput(e.target.value)} disabled={isLoading} />
-              <button type="submit" className="bg-white text-black font-bold px-6 py-3 rounded-sm hover:bg-neutral-200 transition-colors disabled:opacity-50" disabled={isLoading}>Send</button>
+              <button type="submit" className="bg-white text-black font-bold px-6 py-3 rounded-sm hover:bg-neutral-200 transition-colors disabled:opacity-50" disabled={isLoading || !input.trim()}>Send</button>
             </form>
           </div>
         </div>

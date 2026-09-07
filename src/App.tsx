@@ -13,6 +13,7 @@ import AIConcierge from './modules/AIConcierge'
 import AdminPanel from './components/AdminPanel'
 import Blog from './modules/Blog'
 import Podcast from './modules/Podcast'
+import NotFound from './modules/NotFound'
 
 const ScrollToTop = () => {
   const { pathname } = useLocation()
@@ -73,6 +74,7 @@ const App: React.FC = () => {
           <Route path="/podcast" element={<Podcast store={store} />} />
           <Route path="/podcast/:slug" element={<Podcast store={store} />} />
           <Route path="/admin" element={<AdminPanel store={store} onUpdate={setStore} isAdmin={isAdmin} onAuthChange={setIsAdmin} />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
       </Layout>
     </Router>

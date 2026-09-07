@@ -1,6 +1,6 @@
 import { GoogleGenAI } from '@google/genai'
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { PRIMARY_MODEL, getFallbackModel, isOverloaded } from './_lib/gemini-models.js'
+import { PRIMARY_MODEL, getFallbackModels, isOverloaded, isModelUnavailable, markModelBroken } from './_lib/gemini-models.js'
 
 // Module-level: allocated once per warm serverless instance
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! })
@@ -63,20 +63,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } catch (primaryErr: any) {
       // Rate limited or busy — drop to a lighter model rather than failing.
       if (!isOverloaded(primaryErr)) throw primaryErr
-      const fallback = await getFallbackModel()
-      if (!fallback) throw primaryErr
-      console.warn(`AI proxy: ${PRIMARY_MODEL} unavailable, falling back to ${fallback}`)
-      try {
-        response = await ask(fallback)
-      } catch (fallbackErr: any) {
-        // The visitor's problem is the PRIMARY failure (we're rate limited); a broken
-        // fallback must not turn that into a misleading generic error.
-        console.error('AI proxy: fallback also failed:', fallbackErr?.message)
-        throw primaryErr
+      const candidates = await getFallbackModels()
+      if (candidates.length === 0) throw primaryErr
+      // Try up to 2 candidates: a listed model can still 404 as "no longer available to new
+      // users" (a real prod case — ListModels doesn't reflect that restriction). When that
+      // happens, blacklist the id so later requests skip it, and try the next candidate
+      // instead of giving up on the whole request.
+      let gotResponse = false
+      for (const fallback of candidates.slice(0, 2)) {
+        console.warn(`AI proxy: ${PRIMARY_MODEL} unavailable, trying fallback ${fallback}`)
+        try {
+          response = await ask(fallback)
+          gotResponse = true
+          break
+        } catch (fallbackErr: any) {
+          console.error(`AI proxy: fallback ${fallback} failed:`, fallbackErr?.message)
+          if (isModelUnavailable(fallbackErr)) markModelBroken(fallback)
+        }
       }
+      // The visitor's problem is the PRIMARY failure (we're rate limited); a broken
+      // fallback must not turn that into a misleading generic error.
+      if (!gotResponse) throw primaryErr
     }
 
-    const text = response.text ?? ''
+    // Every path above either assigns response or throws, so it's always set here.
+    const text = response!.text ?? ''
     if (text) responseCache.set(cacheKey, { text, expiresAt: now + CACHE_TTL })
     return res.status(200).json({ text })
   } catch (err: any) {
