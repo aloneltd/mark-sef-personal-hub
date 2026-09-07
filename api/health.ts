@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { driveHealth } from './_lib/drive.js'
+import { driveHealth, driveWriteProbe } from './_lib/drive.js'
 import { read, CACHE_TTL_MS } from './_lib/store.js'
 
 // Public, non-secret health check: is the backend wired up? Never returns key material.
-export default async function handler(_req: VercelRequest, res: VercelResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   const drive = await driveHealth()
 
   let storeRead: Record<string, unknown> = { ok: false }
@@ -17,6 +17,12 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     }
   }
 
+  // /api/health?probe=write actually writes (and deletes) a file, so a read-only
+  // identity cannot look healthy while every save silently fails.
+  const write = req.query?.probe === 'write' ? await driveWriteProbe() : undefined
+
+  // ok is mode-agnostic: keyParses only applies to service-account mode, so gating
+  // on it would make a healthy user-OAuth deployment report unhealthy.
   const ok = drive.configured === true && drive.tokenOk === true && drive.folderListStatus === 200
   res.setHeader('Cache-Control', 'no-store')
   res.status(ok ? 200 : 503).json({
@@ -28,5 +34,6 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     gemini: { configured: !!process.env.GEMINI_API_KEY },
     drive,
     storeRead,
+    ...(write ? { write } : {}),
   })
 }
