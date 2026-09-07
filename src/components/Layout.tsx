@@ -115,7 +115,7 @@ const Layout: React.FC<LayoutProps> = ({ children, navLinks, brandName, theme, s
           <div className="text-neutral-500 text-sm">© {new Date().getFullYear()} {brandName}. All rights reserved.</div>
           <div className="flex gap-6">
             {dbStatus === 'offline' && (
-              <span className="text-neutral-600 text-xs mono" title="Live database unreachable — showing bundled default content" data-testid="offline-indicator">
+              <span className="text-neutral-600 text-xs mono" title="Content store unreachable — showing bundled default content" data-testid="offline-indicator">
                 ● OFFLINE MODE
               </span>
             )}
