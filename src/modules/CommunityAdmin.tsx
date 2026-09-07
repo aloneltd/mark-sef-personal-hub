@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { ContentStore, CommunityConfig, FormField, CommunityMember, FormFieldType } from '../types'
 
 interface CommunityAdminProps {
@@ -10,7 +10,29 @@ const FIELD_TYPES: FormFieldType[] = ['text', 'textarea', 'radio', 'checklist', 
 
 export const CommunityAdmin: React.FC<CommunityAdminProps> = ({ store, onUpdate }) => {
   const [activeSubTab, setActiveSubTab] = useState<'form' | 'registry'>('form')
+  // Signups arrive through /api/community and live in the server-side store, not in the
+  // content document — so the registry loads them from the API and merges them with any
+  // members the operator typed in by hand.
+  const [serverMembers, setServerMembers] = useState<CommunityMember[]>([])
+  const [registryError, setRegistryError] = useState('')
   const community = store.modules.community
+
+  const loadRegistry = useCallback(async () => {
+    try {
+      const res = await fetch('/api/community', { credentials: 'same-origin' })
+      const body = await res.json().catch(() => ({})) as { members?: CommunityMember[]; error?: string }
+      if (!res.ok) { setRegistryError(body.error || `Registry unavailable (${res.status})`); setServerMembers([]); return }
+      setRegistryError('')
+      setServerMembers(body.members || [])
+    } catch {
+      setRegistryError('Registry unavailable — storage could not be reached.')
+      setServerMembers([])
+    }
+  }, [])
+
+  useEffect(() => { if (activeSubTab === 'registry') void loadRegistry() }, [activeSubTab, loadRegistry])
+
+  const allMembers: CommunityMember[] = [...serverMembers, ...community.members]
 
   const updateCommunity = (updates: Partial<CommunityConfig>) => {
     onUpdate({ ...store, modules: { ...store.modules, community: { ...community, ...updates } } })
@@ -39,17 +61,27 @@ export const CommunityAdmin: React.FC<CommunityAdminProps> = ({ store, onUpdate 
   }
 
   const updateMember = (id: string, updates: Partial<CommunityMember>) => {
+    if (serverMembers.some(m => m.id === id)) {
+      setServerMembers(prev => prev.map(m => m.id === id ? { ...m, ...updates } : m))
+      return
+    }
     updateCommunity({ members: community.members.map(m => m.id === id ? { ...m, ...updates } : m) })
   }
 
-  const deleteMember = (id: string) => {
+  const deleteMember = async (id: string) => {
     if (!confirm('Decommission this member record?')) return
+    if (serverMembers.some(m => m.id === id)) {
+      const res = await fetch(`/api/community?id=${encodeURIComponent(id)}`, { method: 'DELETE', credentials: 'same-origin' })
+      if (!res.ok) { alert('Could not remove that record — storage is unavailable.'); return }
+      setServerMembers(prev => prev.filter(m => m.id !== id))
+      return
+    }
     updateCommunity({ members: community.members.filter(m => m.id !== id) })
   }
 
   const exportCSV = () => {
     const headers = ['Email', 'Role', 'Join Date', ...community.formFields.map(f => f.label)].join(',')
-    const rows = community.members.map(m => {
+    const rows = allMembers.map(m => {
       const fieldData = community.formFields.map(f => `"${m.fields[f.id] || ''}"`).join(',')
       return `"${m.email}","${m.role}","${m.joinDate}",${fieldData}`
     })
@@ -135,8 +167,12 @@ export const CommunityAdmin: React.FC<CommunityAdminProps> = ({ store, onUpdate 
         <div className="space-y-8 animate-in">
           <header className="flex justify-between items-center">
             <h3 className="text-xs uppercase mono tracking-[0.3em] text-neutral-600 font-bold">Operator Spreadsheet</h3>
-            <button onClick={exportCSV} className="text-[10px] mono uppercase border-b border-white/10 hover:border-white transition-all text-neutral-400 hover:text-white">Export CSV</button>
+            <div className="flex items-center gap-4">
+              <button onClick={() => void loadRegistry()} className="text-[10px] mono uppercase border-b border-white/10 hover:border-white transition-all text-neutral-400 hover:text-white">Refresh</button>
+              <button onClick={exportCSV} className="text-[10px] mono uppercase border-b border-white/10 hover:border-white transition-all text-neutral-400 hover:text-white">Export CSV</button>
+            </div>
           </header>
+          {registryError && <p className="text-amber-400 text-[10px] mono uppercase" data-testid="registry-error">{registryError}</p>}
           <div className="border border-white/5 bg-black/40 rounded-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse min-w-[800px]">
@@ -151,7 +187,7 @@ export const CommunityAdmin: React.FC<CommunityAdminProps> = ({ store, onUpdate 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/5">
-                  {community.members.map((member, i) => (
+                  {allMembers.map((member, i) => (
                     <tr key={member.id} className="hover:bg-white/5 transition-colors group">
                       <td className="p-4 text-[10px] mono text-neutral-700">{i + 1}</td>
                       <td className="p-4 text-xs font-bold text-neutral-200">{member.email}</td>
@@ -170,7 +206,7 @@ export const CommunityAdmin: React.FC<CommunityAdminProps> = ({ store, onUpdate 
                 </tbody>
               </table>
             </div>
-            {community.members.length === 0 && <div className="py-20 text-center text-neutral-700 italic text-[9px] uppercase tracking-[0.4em]">No Personnel Detected</div>}
+            {allMembers.length === 0 && <div className="py-20 text-center text-neutral-700 italic text-[9px] uppercase tracking-[0.4em]">No Personnel Detected</div>}
           </div>
         </div>
       )}

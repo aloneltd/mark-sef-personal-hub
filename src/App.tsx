@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom'
 import { getStore } from './store'
 import { ContentStore } from './types'
-import { supabase } from './lib/supabase'
+import { getSession } from './lib/auth'
 import Layout from './components/Layout'
 import Home from './modules/Home'
 import About from './modules/About'
@@ -29,24 +29,15 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const init = async () => {
-      // getStore() is bounded (see store.ts): with the DB paused it resolves to the
+      // getStore() is bounded (see store.ts): if storage is unreachable it resolves to the
       // bundled defaults within ~4s, so the loader can never spin forever.
       setStore(await getStore())
       setLoading(false)
-      // Auth session is resolved off the critical path — public content never waits on it.
-      if (supabase) {
-        supabase.auth.getSession()
-          .then(({ data: { session } }) => setIsAdmin(session?.user?.email === 'm@alone.ltd'))
-          .catch(() => setIsAdmin(false))
-      }
+      // The session is resolved off the critical path — public content never waits on it.
+      // isAdmin is only a UI hint; every write is re-checked server-side against the cookie.
+      getSession().then(s => setIsAdmin(s.isAdmin)).catch(() => setIsAdmin(false))
     }
     init()
-
-    if (!supabase) return
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setIsAdmin(session?.user?.email === 'm@alone.ltd')
-    })
-    return () => subscription.unsubscribe()
   }, [])
 
   if (loading || !store) {
@@ -81,7 +72,7 @@ const App: React.FC = () => {
           <Route path="/blog/:slug" element={<Blog store={store} />} />
           <Route path="/podcast" element={<Podcast store={store} />} />
           <Route path="/podcast/:slug" element={<Podcast store={store} />} />
-          <Route path="/admin" element={<AdminPanel store={store} onUpdate={setStore} isAdmin={isAdmin} />} />
+          <Route path="/admin" element={<AdminPanel store={store} onUpdate={setStore} isAdmin={isAdmin} onAuthChange={setIsAdmin} />} />
         </Routes>
       </Layout>
     </Router>

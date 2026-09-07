@@ -1,5 +1,4 @@
-import { supabase } from './lib/supabase'
-import { DB_TIMEOUT_MS, sleep } from './lib/dbStatus'
+import { setDbStatus, timedFetch } from './lib/dbStatus'
 import { ContentStore, SectionDefinition, SectionStyleTokens, ImageSource } from './types'
 
 export const SCHEMA_VERSION = '1.3.6'
@@ -179,30 +178,32 @@ export const DEFAULT_CONTENT: ContentStore = {
   },
 }
 
-// Loads the CMS blob from Supabase. Falls back to the bundled DEFAULT_CONTENT when the
-// database is unreachable, times out (> DB_TIMEOUT_MS), or holds nothing yet.
+// Loads the CMS document from the server-side store (Google Drive JSON, see api/_lib/store.ts).
+// Bounded by timedFetch: if storage is unreachable or unconfigured we render the bundled
+// DEFAULT_CONTENT immediately rather than making the visitor wait.
 export const getStore = async (): Promise<ContentStore> => {
-  if (!supabase) return DEFAULT_CONTENT
   try {
-    const query = supabase
-      .from('hub_settings')
-      .select('content')
-      .eq('id', 1)
-      .single()
-    const result = await Promise.race([query, sleep(DB_TIMEOUT_MS + 500).then(() => null)])
-    if (!result) return DEFAULT_CONTENT
-    const { data, error } = result
-    if (error || !data?.content || Object.keys(data.content).length === 0) return DEFAULT_CONTENT
-    return { ...DEFAULT_CONTENT, ...data.content }
+    const res = await timedFetch('/api/content')
+    if (!res.ok) { setDbStatus('offline'); return DEFAULT_CONTENT }
+    const body = await res.json() as { content?: Partial<ContentStore> | null; degraded?: boolean }
+    if (body.degraded) { setDbStatus('offline'); return DEFAULT_CONTENT }
+    setDbStatus('online')
+    if (!body.content || Object.keys(body.content).length === 0) return DEFAULT_CONTENT
+    return { ...DEFAULT_CONTENT, ...body.content }
   } catch {
+    setDbStatus('offline')
     return DEFAULT_CONTENT
   }
 }
 
 export const saveStore = async (store: ContentStore): Promise<void> => {
-  if (!supabase) throw new Error('Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY')
-  const { error } = await supabase
-    .from('hub_settings')
-    .upsert({ id: 1, content: store, updated_at: new Date().toISOString() })
-  if (error) throw new Error(error.message)
+  const res = await timedFetch('/api/content', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ content: store }),
+  }, 15000)
+  const body = await res.json().catch(() => ({})) as { error?: string }
+  if (!res.ok) throw new Error(body.error || `Save failed (${res.status})`)
+  setDbStatus('online')
 }

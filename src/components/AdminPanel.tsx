@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { ContentStore, SectionType, SectionDefinition, ImageSource, NavLink, BlogPost, PodcastEpisode } from '../types'
 import { saveStore, DEFAULT_CONTENT } from '../store'
-import { supabase } from '../lib/supabase'
+import { signOut } from '../lib/auth'
+import GoogleSignIn from './GoogleSignIn'
 import { useDbStatus } from '../lib/dbStatus'
 import AdminPreview from './AdminPreview'
 import { CommunityAdmin } from '../modules/CommunityAdmin'
@@ -15,6 +16,7 @@ interface AdminPanelProps {
   store: ContentStore
   onUpdate: (newStore: ContentStore) => void
   isAdmin: boolean
+  onAuthChange: (isAdmin: boolean) => void
 }
 
 const SECTION_TYPES: SectionType[] = [
@@ -121,54 +123,30 @@ const ImageInput: React.FC<{ label: string; value: ImageSource; onChange: (val: 
   )
 }
 
-const LoginForm: React.FC = () => {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+const LoginForm: React.FC<{ onSignedIn: () => void }> = ({ onSignedIn }) => {
   const dbStatus = useDbStatus()
-  const dbOffline = dbStatus === 'offline'
-
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    if (!supabase) { setError('Supabase not configured — set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in Vercel.'); setLoading(false); return }
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-    if (err) setError(/unreachable|offline|fetch/i.test(err.message) ? 'Database unavailable — sign-in is not possible until the Supabase project is restored.' : err.message)
-    setLoading(false)
-  }
+  const storageOffline = dbStatus === 'offline'
 
   return (
     <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center">
       <div className="w-full max-w-sm p-10 border border-white/10 bg-neutral-900/50">
         <h1 className="text-xl font-bold italic mb-2">Master Control</h1>
-        <p className="text-[10px] mono uppercase text-neutral-600 mb-8">Admin Access Required</p>
-        {dbOffline && (
+        <p className="text-[10px] mono uppercase text-neutral-600 mb-8">Sign in with the owner Google account</p>
+        {storageOffline && (
           <div className="mb-6 p-3 border border-amber-500/30 bg-amber-500/5 text-amber-400 text-xs mono" data-testid="db-unavailable">
-            DATABASE UNAVAILABLE — the Supabase project is paused or unreachable. The public site is running on bundled default content; admin sign-in and editing will work again once the database is restored.
+            STORAGE NOT CONFIGURED — the public site is running on bundled default content. You can sign in, but saving needs GOOGLE_SERVICE_ACCOUNT_KEY and GOOGLE_DRIVE_FOLDER_ID set in Vercel.
           </div>
         )}
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <label className="text-[9px] mono uppercase text-neutral-500 block mb-1">Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-black border border-white/10 p-3 text-sm outline-none focus:border-white/30" required />
-          </div>
-          <div>
-            <label className="text-[9px] mono uppercase text-neutral-500 block mb-1">Password</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-black border border-white/10 p-3 text-sm outline-none focus:border-white/30" required />
-          </div>
-          {error && <p className="text-red-400 text-xs mono">{error}</p>}
-          <button type="submit" disabled={loading || dbOffline} className="w-full py-3 bg-white text-black font-bold uppercase text-xs tracking-widest hover:bg-neutral-200 disabled:opacity-50">
-            {loading ? 'Authenticating...' : dbOffline ? 'Database Unavailable' : 'Access Control'}
-          </button>
-        </form>
+        <GoogleSignIn onSignedIn={onSignedIn} />
+        <p className="mt-8 text-[9px] mono uppercase text-neutral-600 leading-relaxed">
+          Only m@alone.ltd can administer this site. Your Google account is verified on the server; no password is stored anywhere.
+        </p>
       </div>
     </div>
   )
 }
 
-const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => {
+const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin, onAuthChange }) => {
   const [localStore, setLocalStore] = useState<ContentStore>(store)
   const [activeTab, setActiveTab] = useState<'builder' | 'theme' | 'brand' | 'modules' | 'community' | 'blog' | 'podcast' | 'ai' | 'nav' | 'auth'>('builder')
   const [selectedPage, setSelectedPage] = useState<keyof ContentStore['pageLayouts']>('home')
@@ -178,7 +156,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
   const [saving, setSaving] = useState(false)
   const dbStatus = useDbStatus()
 
-  if (!isAdmin) return <LoginForm />
+  if (!isAdmin) return <LoginForm onSignedIn={() => onAuthChange(true)} />
 
   const syncUpdate = (newStore: ContentStore) => {
     setLocalStore(newStore)
@@ -192,7 +170,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
       onUpdate(localStore)
       alert('DEPLOYMENT SUCCESSFUL.')
     } catch (e: any) {
-      const msg = /unreachable|offline|fetch/i.test(String(e?.message)) ? 'Database unavailable — changes were not saved. Restore the Supabase project and deploy again.' : e.message
+      const msg = /unreachable|offline|fetch/i.test(String(e?.message)) ? 'Storage unavailable — changes were not saved. Check GOOGLE_SERVICE_ACCOUNT_KEY / GOOGLE_DRIVE_FOLDER_ID in Vercel.' : e.message
       alert('DEPLOYMENT FAILED: ' + msg)
     } finally {
       setSaving(false)
@@ -214,7 +192,8 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
   }
 
   const handleSignOut = async () => {
-    if (supabase) await supabase.auth.signOut()
+    await signOut()
+    onAuthChange(false)
   }
 
   const renderSectionEditor = (section: SectionDefinition, onSectionUpdate: (updates: Partial<SectionDefinition>) => void) => {
@@ -313,7 +292,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
           <div className="px-6 py-10">
             {dbStatus === 'offline' && (
               <div className="mb-6 p-3 border border-amber-500/30 bg-amber-500/5 text-amber-400 text-xs mono" data-testid="db-unavailable">
-                DATABASE UNAVAILABLE — edits below are local only and cannot be deployed until the Supabase project is restored.
+                STORAGE NOT CONFIGURED — edits below are local only and cannot be deployed until GOOGLE_SERVICE_ACCOUNT_KEY and GOOGLE_DRIVE_FOLDER_ID are set in Vercel.
               </div>
             )}
             <div className="flex justify-between items-start mb-10">
@@ -425,7 +404,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ store, onUpdate, isAdmin }) => 
                 <h3 className="text-xs uppercase mono tracking-widest font-bold">Session</h3>
                 <div className="p-6 border border-white/5 bg-neutral-900/10 rounded-sm space-y-4">
                   <p className="text-sm text-neutral-300">Signed in as <span className="font-bold text-white">m@alone.ltd</span></p>
-                  <p className="text-[10px] text-neutral-500 mono">Admin access granted via Supabase Auth.</p>
+                  <p className="text-[10px] text-neutral-500 mono">Admin access granted via Google sign-in (verified server-side).</p>
                   <button onClick={handleSignOut} className="px-4 py-2 border border-white/20 text-white text-[10px] uppercase mono hover:bg-white/5">Sign Out</button>
                 </div>
               </div>

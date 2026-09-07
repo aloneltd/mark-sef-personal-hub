@@ -80,10 +80,11 @@ export const CommunityFormSection: React.FC<{ section: SectionDefinition; commun
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, fields: formData }),
       })
-      if (!res.ok) throw new Error('submission failed')
+      const body = await res.json().catch(() => ({})) as { error?: string }
+      if (!res.ok) throw new Error(body.error || 'Submission failed. Please try again.')
       setSubmitted(true)
-    } catch {
-      setError('Submission failed. Please try again.')
+    } catch (e: any) {
+      setError(e?.message || 'Submission failed. Please try again.')
     } finally {
       setIsSubmitting(false)
     }
