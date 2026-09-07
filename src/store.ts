@@ -98,7 +98,7 @@ export const DEFAULT_CONTENT: ContentStore = {
           duration: '45:20',
           description: 'Exploring how top recruiters use AI to scale their output.',
           showNotes: 'In this inaugural episode, we break down the stack used by high-performance recruiting teams.',
-          image: wrapUrl('https://images.unsplash.com/photo-1478737270239-2fccd8c7861b?q=80&w=800&auto=format&fit=crop'),
+          image: wrapUrl('https://images.unsplash.com/photo-1590602847861-f357a9332bbc?q=80&w=800&auto=format&fit=crop'),
           mediaType: 'video',
           mediaUrl: 'https://www.youtube.com/embed/dQw4w9WgXcQ',
           platformLinks: { spotify: 'https://spotify.com', apple: 'https://podcasts.apple.com' },
